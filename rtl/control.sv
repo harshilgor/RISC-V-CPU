@@ -19,7 +19,9 @@ module control (
     output logic        jalr,
     output logic        trap_ecall,
     output logic        trap_ebreak,
-    output logic        mret
+    output logic        mret,
+    output logic        csr_op,       // Zicsr instruction
+    output logic        csr_use_imm   // 1 = uimm in rs1 field (CSRR*I)
 );
 
     localparam logic [6:0]
@@ -62,7 +64,8 @@ module control (
     localparam logic [1:0]
         RES_ALU = 2'b00,
         RES_MEM = 2'b01,
-        RES_PC4 = 2'b10;
+        RES_PC4 = 2'b10,
+        RES_CSR = 2'b11;
 
     function automatic logic [3:0] alu_from_funct(
         input logic [2:0] f3,
@@ -111,6 +114,8 @@ module control (
         trap_ecall   = 1'b0;
         trap_ebreak  = 1'b0;
         mret         = 1'b0;
+        csr_op       = 1'b0;
+        csr_use_imm  = 1'b0;
 
         unique case (opcode)
             OP_LUI: begin
@@ -208,8 +213,13 @@ module control (
                         12'h302: mret        = 1'b1;
                         default: ;
                     endcase
+                end else begin
+                    // Zicsr: CSRRW/CSRRS/CSRRC and immediate forms
+                    csr_op      = 1'b1;
+                    reg_write   = 1'b1;          // rd gets old CSR (x0 discards)
+                    result_src  = RES_CSR;
+                    csr_use_imm = funct3[2];     // *I forms have funct3[2]=1
                 end
-                // Full Zicsr (csrrw/…) comes later
             end
 
             default: ;

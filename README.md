@@ -1,8 +1,8 @@
-# RISC-V CPU (RV32IM)
+# RISC-V CPU (RV32IM_Zicsr)
 
 A from-scratch **single-cycle RISC-V CPU** written in SystemVerilog, simulated with [Verilator](https://verilator.org/), and debugged with [GTKWave](https://gtkwave.sourceforge.net/).
 
-This project implements a teaching-oriented **RV32IM** core: the full RV32I base integer ISA, the M (multiply/divide) extension, and a minimal machine-mode trap path (`ecall` / `ebreak` / `mret`).
+This project implements a teaching-oriented **RV32IM_Zicsr** core: RV32I, the M extension, CSR instructions, and machine-mode traps (`ecall` / `ebreak` / `mret`).
 
 **GitHub:** [harshilgor/RISC-V-CPU](https://github.com/harshilgor/RISC-V-CPU)
 
@@ -58,14 +58,15 @@ That design is slower in silicon than a pipeline, but it makes the datapath easy
 | **Jumps** | JAL, JALR, LUI, AUIPC |
 | **Memory** | LB, LH, LW, LBU, LHU, SB, SH, SW |
 | **M extension** | MUL, MULH, MULHSU, MULHU, DIV, DIVU, REM, REMU |
+| **Zicsr** | CSRRW, CSRRS, CSRRC + CSRRWI/SI/CI |
+| **CSRs** | `mstatus`, `mtvec`, `mepc`, `mcause` |
 | **System** | FENCE (NOP), ECALL, EBREAK, MRET |
-| **Traps** | Fixed `mtvec = 0x100`; `mepc` / `mcause` updated on trap |
+| **Traps** | `mepc` = faulting PC; handler advances `mepc` then `mret` |
 | **Simulation** | Verilator C++ testbenches + VCD waves for GTKWave |
 
 ### Not implemented (yet)
 
-- Full **Zicsr** CSR instruction set (`csrrw`, `csrrs`, ...)
-- Interrupts / timers / full privileged ISA
+- Interrupts / timers / richer privileged ISA
 - C (compressed), F/D (float), A (atomics)
 - Pipelining, caches, MMU
 - FPGA synthesis flow
@@ -89,7 +90,8 @@ RISC-V-CPU/
 |   |-- imm_gen.sv           # Immediate generator
 |   |-- control.sv           # Control unit
 |   |-- alu.sv               # Integer ALU
-|   `-- mdu.sv               # Multiply / divide unit
+|   |-- mdu.sv               # Multiply / divide unit
+|   `-- csr_file.sv          # Machine CSRs (Zicsr)
 |-- tb/                      # Verilator C++ testbenches
 |   |-- tb_cpu.cpp           # Full-core integration tests
 |   |-- tb_alu.cpp
@@ -157,20 +159,19 @@ Priority (highest first):
 | `control` | `rtl/control.sv` | Opcode/funct decode to control signals |
 | `alu` | `rtl/alu.sv` | Combinational integer ALU |
 | `mdu` | `rtl/mdu.sv` | Combinational multiply/divide unit |
+| `csr_file` | `rtl/csr_file.sv` | `mstatus` / `mtvec` / `mepc` / `mcause` |
 
 ---
 
-## Trap model (teaching)
+## Trap model
 
 | Event | Behavior |
 |-------|----------|
-| `ecall` | Jump to `0x100`, set `mcause = 11`, `mepc = PC+4` |
-| `ebreak` | Jump to `0x100`, set `mcause = 3`, `mepc = PC+4` |
+| `ecall` | Jump to `mtvec`, set `mcause = 11`, `mepc =` faulting PC |
+| `ebreak` | Jump to `mtvec`, set `mcause = 3`, `mepc =` faulting PC |
 | `mret` | Jump to `mepc` |
 
-**Important difference from full RISC-V:** a compliant core leaves `mepc` at the **faulting** instruction; software usually adds 4 before `mret`. This core stores **PC+4** automatically so handlers can return without CSR write instructions. That is intentional until Zicsr is implemented.
-
-Debug outputs `dbg_mepc` and `dbg_mcause` expose trap state to the testbench and GTKWave.
+Handlers use **Zicsr** to bump `mepc` by 4 before `mret` (standard software pattern).
 
 ---
 
@@ -237,7 +238,8 @@ PASS: RV32IM + traps all tests passed
 3. **Jumps** -- jal, jalr, auipc link/target behavior
 4. **Memory** -- sb/sh/sw and lb/lh/lbu/lhu/lw
 5. **RV32M** -- mul/mulh/mulhu, div/rem (signed/unsigned), divide-by-zero, fence
-6. **Traps** -- ecall to handler at `0x100`, then mret back to the next instruction
+6. **Traps + Zicsr** -- ecall, handler does `csrr`/`addi`/`csrw` on `mepc`, then `mret`
+7. **CSR ops** -- CSRRW / CSRRS / CSRRC / CSRRWI on `mstatus` / `mtvec` / `mcause`
 
 Waveforms go to `waves/cpu.vcd`. Useful signals in GTKWave: `clk`, `dbg_pc`, `dbg_instr`, `dbg_reg_data`, `dbg_mepc`, `dbg_mcause`.
 
@@ -255,9 +257,8 @@ Waveforms go to `waves/cpu.vcd`. Useful signals in GTKWave: `clk`, `dbg_pc`, `db
 
 ## Roadmap
 
-- [ ] Full **Zicsr** (CSR read/write instructions)
+- [ ] Interrupts (`mie` / `mip`) and more CSRs
 - [ ] Assembler / `riscv32-unknown-elf-gcc` to `.hex` load flow
-- [ ] Richer privileged behavior (interrupts, `mstatus`, ...)
 - [ ] Optional 5-stage pipeline
 - [ ] FPGA synthesis (timing / Fmax)
 

@@ -1,4 +1,4 @@
-// Single-cycle RV32IM CPU — datapath + minimal machine traps
+// Single-cycle RV32IM_Zicsr CPU — datapath + CSR file + traps
 module cpu (
     input  logic        clk,
     input  logic        rst_n,
@@ -14,10 +14,10 @@ module cpu (
     output logic [31:0] dbg_pc,
     output logic [31:0] dbg_instr,
     output logic [31:0] dbg_mepc,
-    output logic [31:0] dbg_mcause
+    output logic [31:0] dbg_mcause,
+    output logic [31:0] dbg_mtvec,
+    output logic [31:0] dbg_mstatus
 );
-
-    localparam logic [31:0] MTVEC_RESET = 32'h0000_0100;
 
     // -------------------------------------------------------------------------
     // Fetch
@@ -53,14 +53,18 @@ module cpu (
     logic [2:0]  funct3;
     logic [6:0]  funct7;
     logic [11:0] funct12;
+    logic [11:0] csr_addr;
+    logic [4:0]  csr_uimm;
 
-    assign opcode  = instr[6:0];
-    assign rd      = instr[11:7];
-    assign funct3  = instr[14:12];
-    assign rs1     = instr[19:15];
-    assign rs2     = instr[24:20];
-    assign funct7  = instr[31:25];
-    assign funct12 = instr[31:20];
+    assign opcode   = instr[6:0];
+    assign rd       = instr[11:7];
+    assign funct3   = instr[14:12];
+    assign rs1      = instr[19:15];
+    assign rs2      = instr[24:20];
+    assign funct7   = instr[31:25];
+    assign funct12  = instr[31:20];
+    assign csr_addr = instr[31:20];
+    assign csr_uimm = instr[19:15];
 
     // -------------------------------------------------------------------------
     // Control
@@ -80,6 +84,8 @@ module cpu (
     logic       trap_ecall;
     logic       trap_ebreak;
     logic       mret;
+    logic       csr_op;
+    logic       csr_use_imm;
 
     control u_control (
         .opcode      (opcode),
@@ -100,7 +106,9 @@ module cpu (
         .jalr        (jalr),
         .trap_ecall  (trap_ecall),
         .trap_ebreak (trap_ebreak),
-        .mret        (mret)
+        .mret        (mret),
+        .csr_op      (csr_op),
+        .csr_use_imm (csr_use_imm)
     );
 
     logic trap;
@@ -180,34 +188,72 @@ module cpu (
         .rdata  (mem_rdata)
     );
 
+    // -------------------------------------------------------------------------
+    // Zicsr — CSR file
+    // -------------------------------------------------------------------------
+    logic [31:0] csr_rdata, csr_wdata;
+    logic        csr_we;
+    logic [31:0] csr_src;
+    logic [31:0] mtvec, mepc, mcause, mstatus;
+
+    assign csr_src = csr_use_imm ? {27'b0, csr_uimm} : rs1_data;
+
+    // CSRRW  = 001, CSRRS = 010, CSRRC = 011
+    // CSRRWI = 101, CSRRSI= 110, CSRRCI= 111
+    always_comb begin
+        unique case (funct3[1:0])
+            2'b01:   csr_wdata = csr_src;                 // RW
+            2'b10:   csr_wdata = csr_rdata | csr_src;     // RS / set
+            2'b11:   csr_wdata = csr_rdata & ~csr_src;    // RC / clear
+            default: csr_wdata = csr_src;
+        endcase
+    end
+
+    // Writes: CSRRW/I always write; RS/RC write only if source != 0
+    always_comb begin
+        csr_we = 1'b0;
+        if (csr_op && !trap) begin
+            unique case (funct3[1:0])
+                2'b01:   csr_we = 1'b1;                   // RW / RWI
+                2'b10,
+                2'b11:   csr_we = (csr_src != 32'h0);     // RS/RC and *I
+                default: csr_we = 1'b0;
+            endcase
+        end
+    end
+
+    csr_file u_csr (
+        .clk         (clk),
+        .rst_n       (rst_n),
+        .addr        (csr_addr),
+        .wdata       (csr_wdata),
+        .we          (csr_we),
+        .rdata       (csr_rdata),
+        .trap        (trap),
+        .trap_ebreak (trap_ebreak),
+        .trap_pc     (pc),
+        .mtvec       (mtvec),
+        .mepc        (mepc),
+        .mcause      (mcause),
+        .mstatus     (mstatus)
+    );
+
+    assign dbg_mepc    = mepc;
+    assign dbg_mcause  = mcause;
+    assign dbg_mtvec   = mtvec;
+    assign dbg_mstatus = mstatus;
+
+    // -------------------------------------------------------------------------
+    // Writeback
+    // -------------------------------------------------------------------------
     always_comb begin
         unique case (result_src)
             2'b00:   rd_data = exec_result;
             2'b01:   rd_data = mem_read ? mem_rdata : 32'h0;
             2'b10:   rd_data = pc_plus4;
+            2'b11:   rd_data = csr_rdata;   // Zicsr: old CSR value
             default: rd_data = exec_result;
         endcase
-    end
-
-    // -------------------------------------------------------------------------
-    // Machine trap state (minimal — full Zicsr later)
-    // -------------------------------------------------------------------------
-    logic [31:0] mepc, mcause, mtvec;
-
-    assign dbg_mepc   = mepc;
-    assign dbg_mcause = mcause;
-
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            mepc   <= 32'h0;
-            mcause <= 32'h0;
-            mtvec  <= MTVEC_RESET;
-        end else if (trap) begin
-            // Teaching simplification: resume after the trapping instruction.
-            // (Full RISC-V leaves mepc at the faulting PC; software adds 4 via CSRs.)
-            mepc   <= pc_plus4;
-            mcause <= trap_ebreak ? 32'd3 : 32'd11;  // breakpoint / ecall-from-M
-        end
     end
 
     // -------------------------------------------------------------------------

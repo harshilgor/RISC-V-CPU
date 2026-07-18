@@ -60,6 +60,14 @@ int main(int argc, char** argv) {
     set(0b1110011, 0, 0, 0x302);
     expect("MRET", dut->mret);
 
+    // CSRRW
+    set(0b1110011, 0b001, 0, 0x300);
+    expect("CSRRW", dut->csr_op && dut->reg_write && dut->result_src == 3 && !dut->csr_use_imm);
+
+    // CSRRWI
+    set(0b1110011, 0b101, 0, 0x342);
+    expect("CSRRWI", dut->csr_op && dut->csr_use_imm);
+
     // LW
     set(0b0000011, 0b010, 0, 0);
     expect("LW", dut->reg_write && dut->mem_read && dut->result_src == 1);

@@ -93,6 +93,30 @@ static uint32_t ebreak() { return 0x00100073u; }
 static uint32_t mret  () { return 0x30200073u; }
 static uint32_t fence () { return 0x0000000fu; }
 
+// Zicsr
+static constexpr uint32_t CSR_MSTATUS = 0x300;
+static constexpr uint32_t CSR_MTVEC   = 0x305;
+static constexpr uint32_t CSR_MEPC    = 0x341;
+static constexpr uint32_t CSR_MCAUSE  = 0x342;
+
+static uint32_t csrrw(uint32_t rd, uint32_t csr, uint32_t rs1) {
+    return (csr << 20) | (rs1 << 15) | (0x1 << 12) | (rd << 7) | 0x73;
+}
+static uint32_t csrrs(uint32_t rd, uint32_t csr, uint32_t rs1) {
+    return (csr << 20) | (rs1 << 15) | (0x2 << 12) | (rd << 7) | 0x73;
+}
+static uint32_t csrrc(uint32_t rd, uint32_t csr, uint32_t rs1) {
+    return (csr << 20) | (rs1 << 15) | (0x3 << 12) | (rd << 7) | 0x73;
+}
+static uint32_t csrrwi(uint32_t rd, uint32_t csr, uint32_t uimm) {
+    return (csr << 20) | ((uimm & 0x1F) << 15) | (0x5 << 12) | (rd << 7) | 0x73;
+}
+// Pseudos
+static uint32_t csrr(uint32_t rd, uint32_t csr) { return csrrs(rd, csr, 0); }
+static uint32_t csrw(uint32_t csr, uint32_t rs1) { return csrrw(0, csr, rs1); }
+static uint32_t csrc(uint32_t csr, uint32_t rs1) { return csrrc(0, csr, rs1); }
+static uint32_t csrs(uint32_t csr, uint32_t rs1) { return csrrs(0, csr, rs1); }
+
 static uint32_t halt() { return jal(0, 0); }
 
 // ---- Sim helpers ------------------------------------------------------------
@@ -412,25 +436,39 @@ int main(int argc, char** argv) {
         {22, 5,            "rem0"},
     }, 50);
 
-    // ---- Traps: ecall → handler @0x100 → mret -------------------------------
+    // ---- Traps + Zicsr: ecall → handler advances mepc → mret ---------------
     {
-        printf("-- Traps --\n");
+        printf("-- Traps + Zicsr --\n");
         dut->rst_n = 0;
         dut->imem_we = 0;
         tick(dut, tr, t);
 
+        // 0x00: addi x1, x0, 1
+        // 0x04: ecall              <- faulting PC (mepc)
+        // 0x08: addi x2, x0, 2     <- after software mepc+=4 and mret
+        // 0x0C: halt
         load_program(dut, tr, t, {
             addi(1, 0, 1),
             ecall(),
             addi(2, 0, 2),
             halt(),
         });
-        load_at(dut, tr, t, 0x100, addi(31, 0, 77));
-        load_at(dut, tr, t, 0x104, mret());
+
+        // Handler @ 0x100 (default mtvec):
+        //   csrr  x5, mepc
+        //   addi  x5, x5, 4
+        //   csrw  mepc, x5
+        //   addi  x31, x0, 77
+        //   mret
+        load_at(dut, tr, t, 0x100, csrr(5, CSR_MEPC));
+        load_at(dut, tr, t, 0x104, addi(5, 5, 4));
+        load_at(dut, tr, t, 0x108, csrw(CSR_MEPC, 5));
+        load_at(dut, tr, t, 0x10C, addi(31, 0, 77));
+        load_at(dut, tr, t, 0x110, mret());
 
         dut->rst_n = 1;
         tick(dut, tr, t);
-        for (int i = 0; i < 20; i++)
+        for (int i = 0; i < 30; i++)
             tick(dut, tr, t);
 
         auto check = [&](const char* label, uint32_t got, uint32_t exp) {
@@ -446,12 +484,40 @@ int main(int argc, char** argv) {
         check("mcause",      dut->dbg_mcause,   11);
     }
 
+    // ---- Zicsr CSRRW / CSRRC -----------------------------------------------
+    fails += run_case(dut, tr, t, "Zicsr", {
+        addi(1, 0, 0x55),
+        csrw(CSR_MSTATUS, 1),          // mstatus = 0x55
+        csrr(2, CSR_MSTATUS),          // x2 = 0x55
+        addi(3, 0, 0x0F),
+        csrw(CSR_MSTATUS, 3),          // mstatus = 0x0F
+        addi(4, 0, 0x03),
+        csrc(CSR_MSTATUS, 4),          // clear low 2 bits -> 0x0C
+        csrr(5, CSR_MSTATUS),
+        addi(6, 0, 0x30),
+        csrs(CSR_MSTATUS, 6),          // set bits -> 0x3C
+        csrr(7, CSR_MSTATUS),
+        csrrwi(8, CSR_MCAUSE, 11),     // write immediate, x8=old
+        csrr(9, CSR_MCAUSE),
+        // Program mtvec then read back
+        addi(10, 0, 0x200),
+        csrw(CSR_MTVEC, 10),
+        csrr(11, CSR_MTVEC),
+        halt(),
+    }, {
+        {2,  0x55, "csrrw read"},
+        {5,  0x0C, "csrrc"},
+        {7,  0x3C, "csrrs"},
+        {9,  11,   "csrrwi"},
+        {11, 0x200,"mtvec"},
+    }, 30);
+
     tr->close();
     delete tr;
     delete dut;
 
     if (fails == 0) {
-        printf("PASS: RV32IM + traps all tests passed\n");
+        printf("PASS: RV32IM_Zicsr all tests passed\n");
         return 0;
     }
     printf("FAIL: %d check(s) failed\n", fails);
