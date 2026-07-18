@@ -1,0 +1,12 @@
+obj_dir/
+waves/
+*.vcd
+*.fst
+*.exe
+*.o
+*.a
+*.d
+scripts/linktest*
+scripts/linktest_*.exe
+.DS_Store
+Thumbs.db
