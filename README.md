@@ -14,7 +14,7 @@ RISC-V is an open instruction-set architecture. **RV32I** is the 32-bit base int
 
 This CPU is **single-cycle**: in one clock period it fetches an instruction, decodes it, reads registers, executes (ALU or MDU), optionally accesses data memory, writes back a result, and updates the program counter.
 
-That design is slower in silicon than a pipeline, but it makes the datapath easy to understand, simulate, and verify.
+That design is slower in silicon than a pipeline, but it makes the datapath easy to understand, simulate, and verify. A step-by-step plan to evolve it into a **5-stage pipeline** is in [PIPELINE.md](PIPELINE.md).
 
 ```text
                     clk / rst
@@ -82,18 +82,16 @@ RISC-V-CPU/
 |-- Makefile                 # Verilator build / run / waves / clean
 |-- .gitignore
 |-- rtl/                     # SystemVerilog RTL
-|   |-- cpu.sv               # Top-level datapath
-|   |-- pc.sv                # Program counter
-|   |-- imem.sv              # Instruction memory (+ TB load port)
-|   |-- dmem.sv              # Data memory (byte/half/word)
-|   |-- regfile.sv           # Register file
-|   |-- imm_gen.sv           # Immediate generator
-|   |-- control.sv           # Control unit
-|   |-- alu.sv               # Integer ALU
-|   |-- mdu.sv               # Multiply / divide unit
+|   |-- cpu_core.sv          # Core with external I/D buses
+|   |-- cpu.sv               # Legacy wrapper: core + local imem/dmem
+|   |-- soc.sv               # Teaching SoC: core + ROM + RAM + UART
+|   |-- rom.sv / ram.sv      # Boot ROM and data RAM
+|   |-- uart.sv              # Memory-mapped UART TX
+|   |-- pc.sv, imem.sv, dmem.sv, regfile.sv, ...
 |   `-- csr_file.sv          # Machine CSRs (Zicsr)
 |-- tb/                      # Verilator C++ testbenches
 |   |-- tb_cpu.cpp           # Full-core integration tests
+|   |-- tb_soc.cpp           # SoC: ROM boot, RAM, UART hello
 |   |-- tb_alu.cpp
 |   |-- tb_regfile.cpp
 |   |-- tb_imm_gen.cpp
@@ -150,7 +148,11 @@ Priority (highest first):
 
 | Module | File | Role |
 |--------|------|------|
-| `cpu` | `rtl/cpu.sv` | Top-level wiring of the whole core |
+| `cpu_core` | `rtl/cpu_core.sv` | RV32IM_Zicsr core with external buses |
+| `cpu` | `rtl/cpu.sv` | Wrapper: core + local IMEM/DMEM (legacy TB) |
+| `soc` | `rtl/soc.sv` | SoC: core + ROM + RAM + UART |
+| `rom` / `ram` | `rtl/rom.sv`, `rtl/ram.sv` | Boot ROM / data RAM |
+| `uart` | `rtl/uart.sv` | MMIO TX (`TXDATA` / `TXSTATUS`) |
 | `pc` | `rtl/pc.sv` | Clocked program counter |
 | `imem` | `rtl/imem.sv` | Instruction memory + testbench write port |
 | `dmem` | `rtl/dmem.sv` | Data memory with byte/half/word access |
@@ -160,6 +162,20 @@ Priority (highest first):
 | `alu` | `rtl/alu.sv` | Combinational integer ALU |
 | `mdu` | `rtl/mdu.sv` | Combinational multiply/divide unit |
 | `csr_file` | `rtl/csr_file.sv` | `mstatus` / `mtvec` / `mepc` / `mcause` |
+
+---
+
+## Teaching SoC
+
+`soc` maps a simple memory map onto the core's data bus:
+
+| Region | Base | Device |
+|--------|------|--------|
+| ROM (fetch) | `0x0000_0000` | Boot / instruction ROM |
+| RAM | `0x1000_0000` | 4 KiB data RAM |
+| UART | `0x1001_0000` | `TXDATA` @ +0, `TXSTATUS` @ +4 |
+
+Instruction fetch always comes from ROM. Loads/stores decode to RAM or UART. The UART drives a `uart_tx_byte` / `uart_tx_valid` sideband so the testbench can capture printed characters.
 
 ---
 
@@ -202,6 +218,21 @@ From PowerShell in the project root:
 .\scripts\run.ps1 clean    # remove obj_dir/ and waves/
 ```
 
+### SoC tests (ROM + RAM + UART)
+
+```powershell
+.\scripts\run.ps1 "TOP=soc sim"
+```
+
+### Pipelined CPU / SoC (Phases 1–6 complete)
+
+```powershell
+.\scripts\run.ps1 "TOP=cpu_pipe sim"   # core ISA tests
+.\scripts\run.ps1 "TOP=soc sim"        # pipelined SoC: ROM + RAM + UART
+```
+
+See [PIPELINE.md](PIPELINE.md). Default `TOP=cpu` is still the single-cycle wrapper for comparison.
+
 ### Unit-test one module
 
 ```powershell
@@ -216,17 +247,23 @@ From PowerShell in the project root:
 ```bash
 # Prefer a path without spaces, or use the R: mapping
 make                 # TOP=cpu by default
+make TOP=soc sim
 make TOP=alu sim
 make waves
 make clean
 ```
 
-A successful full run ends with:
+A successful full CPU run ends with:
 
 ```text
-PASS: RV32IM + traps all tests passed
+PASS: RV32IM_Zicsr all tests passed
 ```
 
+A successful SoC run ends with:
+
+```text
+PASS: SoC all tests passed
+```
 ---
 
 ## What the integration tests cover
@@ -257,9 +294,10 @@ Waveforms go to `waves/cpu.vcd`. Useful signals in GTKWave: `clk`, `dbg_pc`, `db
 
 ## Roadmap
 
+- [x] Teaching SoC: ROM + RAM + memory-mapped UART
+- [x] [5-stage pipeline](PIPELINE.md) Phases 1–6 complete (pipelined SoC)
 - [ ] Interrupts (`mie` / `mip`) and more CSRs
 - [ ] Assembler / `riscv32-unknown-elf-gcc` to `.hex` load flow
-- [ ] Optional 5-stage pipeline
 - [ ] FPGA synthesis (timing / Fmax)
 
 ---

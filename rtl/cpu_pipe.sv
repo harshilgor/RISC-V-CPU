@@ -1,5 +1,5 @@
-// Backward-compatible CPU wrapper: core + local IMEM/DMEM (unit / legacy tests)
-module cpu (
+// Pipelined CPU wrapper: cpu_core_pipe + local IMEM/DMEM (Phase 1+)
+module cpu_pipe (
     input  logic        clk,
     input  logic        rst_n,
 
@@ -14,7 +14,14 @@ module cpu (
     output logic [31:0] dbg_mepc,
     output logic [31:0] dbg_mcause,
     output logic [31:0] dbg_mtvec,
-    output logic [31:0] dbg_mstatus
+    output logic [31:0] dbg_mstatus,
+
+    output logic [31:0] dbg_pc_id,
+    output logic [31:0] dbg_pc_ex,
+    output logic [31:0] dbg_pc_mem,
+    output logic [31:0] dbg_pc_wb,
+    output logic        dbg_stall,
+    output logic        dbg_valid_wb
 );
 
     logic [31:0] imem_addr, imem_rdata;
@@ -22,7 +29,7 @@ module cpu (
     logic        dmem_we, dmem_re;
     logic [2:0]  dmem_funct3;
 
-    cpu_core u_core (
+    cpu_core_pipe u_core (
         .clk(clk), .rst_n(rst_n),
         .imem_addr(imem_addr), .imem_rdata(imem_rdata),
         .dmem_addr(dmem_addr), .dmem_wdata(dmem_wdata), .dmem_rdata(dmem_rdata),
@@ -30,7 +37,10 @@ module cpu (
         .dbg_reg_addr(dbg_reg_addr), .dbg_reg_data(dbg_reg_data),
         .dbg_pc(dbg_pc), .dbg_instr(dbg_instr),
         .dbg_mepc(dbg_mepc), .dbg_mcause(dbg_mcause),
-        .dbg_mtvec(dbg_mtvec), .dbg_mstatus(dbg_mstatus)
+        .dbg_mtvec(dbg_mtvec), .dbg_mstatus(dbg_mstatus),
+        .dbg_pc_id(dbg_pc_id), .dbg_pc_ex(dbg_pc_ex),
+        .dbg_pc_mem(dbg_pc_mem), .dbg_pc_wb(dbg_pc_wb),
+        .dbg_stall(dbg_stall), .dbg_valid_wb(dbg_valid_wb)
     );
 
     imem u_imem (
@@ -42,7 +52,6 @@ module cpu (
         .wdata(imem_wdata)
     );
 
-    // dmem_re unused here (combinational read always available)
     /* verilator lint_off UNUSEDSIGNAL */
     logic unused_re;
     assign unused_re = dmem_re;

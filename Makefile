@@ -14,8 +14,8 @@ TB_DIR    := tb
 WAVE_DIR  := waves
 OBJ_DIR   := obj_dir
 
-# Full CPU needs every RTL file; unit tests only need the one module.
-ifeq ($(TOP),cpu)
+# Full CPU / SoC / pipelined CPU need every RTL file; unit tests only need one module.
+ifeq ($(filter $(TOP),cpu soc cpu_pipe),$(TOP))
 RTL_SRCS := $(wildcard $(RTL_DIR)/*.sv)
 else
 RTL_SRCS := $(RTL_DIR)/$(TOP).sv
