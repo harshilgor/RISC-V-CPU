@@ -294,7 +294,7 @@ The single-cycle core (`cpu_core` / `TOP=cpu`) is unchanged and remains the defa
 
 ### Phase 3 — Branches and jumps ✅
 
-**Status: implemented** (resolve in EX, PC redirect, flush IF/ID)
+**Status: implemented** (resolve in EX, PC redirect, flush IF/ID **and** bubble ID/EX so fall-through cannot execute)
 
 1. `beq`/`bne`/`blt`/`bge`/`bltu`/`bgeu`, `jal`, `jalr` resolved in **EX** (with forwarding).  
 2. On redirect: `pc_next = target`, `flush_if_id` squashes the fall-through instr.  

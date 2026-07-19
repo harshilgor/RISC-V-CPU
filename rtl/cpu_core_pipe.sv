@@ -244,7 +244,10 @@ module cpu_core_pipe (
             id_ex_alu_src_b     <= 1'b0;
             id_ex_alu_op        <= 4'h0;
             id_ex_result_src    <= 2'h0;
-        end else if (stall) begin
+        end else if (stall || flush_if_id) begin
+            // Stall: insert bubble while holding IF/ID.
+            // Flush: also squash the IF/ID instruction so it cannot enter EX
+            // (otherwise a taken jump's fall-through becomes a second redirect).
             id_ex_valid       <= 1'b0;
             id_ex_reg_write   <= 1'b0;
             id_ex_mem_read    <= 1'b0;

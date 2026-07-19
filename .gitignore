@@ -1,4 +1,5 @@
 obj_dir/
+obj_dir_dbg/
 waves/
 *.vcd
 *.fst
@@ -6,7 +7,11 @@ waves/
 *.o
 *.a
 *.d
+*.elf
+*.bin
+*.map
 scripts/linktest*
 scripts/linktest_*.exe
+tools/
 .DS_Store
 Thumbs.db

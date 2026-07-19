@@ -1,24 +1,21 @@
 // Simple RISC-V SoC: pipelined CPU + ROM + RAM + UART
 //
 // Memory map (data bus):
+//   0x0000_0000  ROM   (readable; code + rodata)
 //   0x1000_0000  RAM   (4 KiB)
 //   0x1001_0000  UART  TXDATA@+0, TXSTATUS@+4
-// Instruction fetch always comes from ROM at 0x0000_0000.
-// Phase 6: cpu_core_pipe (5-stage RV32IM_Zicsr).
+// Instruction fetch always comes from ROM.
 module soc (
     input  logic        clk,
     input  logic        rst_n,
 
-    // ROM preload (testbench)
     input  logic        rom_we,
     input  logic [31:0] rom_waddr,
     input  logic [31:0] rom_wdata,
 
-    // UART sideband
     output logic [7:0]  uart_tx_byte,
     output logic        uart_tx_valid,
 
-    // Debug
     input  logic [4:0]  dbg_reg_addr,
     output logic [31:0] dbg_reg_data,
     output logic [31:0] dbg_pc,
@@ -56,20 +53,48 @@ module soc (
         .dbg_stall(dbg_stall), .dbg_valid_wb(dbg_valid_wb)
     );
 
-    // ---- Instruction ROM ----------------------------------------------------
+    logic [31:0] rom_dword;
+
     rom #(
         .DEPTH(1024)
     ) u_rom (
         .clk(clk),
-        .addr(imem_addr),
-        .rdata(imem_rdata),
+        .i_addr(imem_addr),
+        .i_rdata(imem_rdata),
+        .d_addr(dmem_addr),
+        .d_rdata(rom_dword),
         .we(rom_we),
         .waddr(rom_waddr),
         .wdata(rom_wdata)
     );
 
-    // ---- Address decode -----------------------------------------------------
-    logic sel_ram, sel_uart;
+    logic [7:0]  rom_byte;
+    logic [15:0] rom_half;
+    logic [31:0] rom_rdata;
+
+    always_comb begin
+        unique case (dmem_addr[1:0])
+            2'b00: rom_byte = rom_dword[7:0];
+            2'b01: rom_byte = rom_dword[15:8];
+            2'b10: rom_byte = rom_dword[23:16];
+            2'b11: rom_byte = rom_dword[31:24];
+        endcase
+        rom_half = dmem_addr[1] ? rom_dword[31:16] : rom_dword[15:0];
+    end
+
+    always_comb begin
+        unique case (dmem_funct3)
+            3'b000:  rom_rdata = {{24{rom_byte[7]}}, rom_byte};
+            3'b001:  rom_rdata = {{16{rom_half[15]}}, rom_half};
+            3'b010:  rom_rdata = rom_dword;
+            3'b100:  rom_rdata = {24'b0, rom_byte};
+            3'b101:  rom_rdata = {16'b0, rom_half};
+            default: rom_rdata = rom_dword;
+        endcase
+    end
+
+    logic sel_rom, sel_ram, sel_uart;
+    assign sel_rom  = (dmem_addr[31:28] == 4'h0);
     assign sel_ram  = (dmem_addr[31:16] == RAM_BASE[31:16]);
     assign sel_uart = (dmem_addr[31:16] == UART_BASE[31:16]);
 
@@ -84,7 +109,7 @@ module soc (
         .DEPTH(1024)
     ) u_ram (
         .clk(clk),
-        .addr({16'h0, dmem_addr[15:0]}),  // local offset
+        .addr({16'h0, dmem_addr[15:0]}),
         .wdata(dmem_wdata),
         .we(ram_we),
         .funct3(dmem_funct3),
@@ -107,6 +132,7 @@ module soc (
         unique case (1'b1)
             sel_ram:  dmem_rdata = ram_rdata;
             sel_uart: dmem_rdata = uart_rdata;
+            sel_rom:  dmem_rdata = rom_rdata;
             default:  dmem_rdata = 32'h0;
         endcase
     end

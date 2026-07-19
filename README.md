@@ -233,6 +233,16 @@ From PowerShell in the project root:
 
 See [PIPELINE.md](PIPELINE.md). Default `TOP=cpu` is still the single-cycle wrapper for comparison.
 
+### Real program: UART hello
+
+Assembles `sw/hello/hello.S` with a RISC-V GCC (xPack under `tools/` if present), loads the hex into ROM, and checks UART output:
+
+```powershell
+.\scripts\run.ps1 "hello"
+```
+
+Expected: `PASS: hello program printed expected string`
+
 ### Unit-test one module
 
 ```powershell

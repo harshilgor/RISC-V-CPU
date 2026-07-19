@@ -32,7 +32,7 @@ VERILATOR_FLAGS := -Wall --trace --cc --exe --build -j 0 \
 
 SIM_BIN := $(OBJ_DIR)/V$(TOP)
 
-.PHONY: all sim waves clean
+.PHONY: all sim waves clean hello
 
 all: sim
 
@@ -43,8 +43,18 @@ sim: $(SIM_BIN)
 $(SIM_BIN): $(RTL_SRCS) $(TB_SRC)
 	$(VERILATOR) $(VERILATOR_FLAGS) $(RTL_SRCS) $(TB_SRC)
 
+# Build bare-metal hello.S with RISC-V GCC, then run it on the pipelined SoC.
+hello:
+	$(MAKE) -C sw/hello
+	$(VERILATOR) -Wall --trace --cc --exe --build -j 0 \
+		-CFLAGS "-std=c++17" --top-module soc -Mdir $(OBJ_DIR) \
+		$(wildcard $(RTL_DIR)/*.sv) $(TB_DIR)/tb_hello.cpp
+	@mkdir -p $(WAVE_DIR)
+	./$(OBJ_DIR)/Vsoc sw/hello/hello.hex
+
 waves: sim
 	gtkwave $(WAVE_DIR)/$(TOP).vcd &
 
 clean:
 	rm -rf $(OBJ_DIR) $(WAVE_DIR)
+	$(MAKE) -C sw/hello clean
