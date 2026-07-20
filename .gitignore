@@ -15,3 +15,5 @@ scripts/linktest_*.exe
 tools/
 .DS_Store
 Thumbs.db
+
+*.hex

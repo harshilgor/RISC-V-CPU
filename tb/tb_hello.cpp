@@ -90,25 +90,27 @@ struct Sim {
         return true;
     }
 
-    void run_until_idle(int max_cycles = 20000) {
-        // Stop on newline, or once PC is stuck on the halt spin for a while.
-        // Do NOT use dbg_instr alone: the halt encoding is briefly fetched as
-        // the fall-through of the loop jump and would stop the sim early.
+    void run_until_idle(int max_cycles = 100000) {
+        // Run until the program hits its halt spin (`j .` / jal x0,0), not on
+        // the first newline — C demos may print multiple lines.
         int halt_pc_seen = 0;
+        int idle = 0;
+        size_t last_len = 0;
         for (int i = 0; i < max_cycles; ++i) {
             tick();
-            if (!uart_out.empty() && uart_out.back() == '\n') {
-                for (int k = 0; k < 8; ++k) tick();
-                return;
-            }
-            // Halt spin is at 0x1c (jal x0, 0)
-            if (top->dbg_pc == 0x1cu && top->dbg_instr == halt_enc()) {
-                if (++halt_pc_seen > 32) {
+            if (top->dbg_instr == halt_enc()) {
+                if (++halt_pc_seen > 64) {
                     for (int k = 0; k < 16; ++k) tick();
                     return;
                 }
             } else {
                 halt_pc_seen = 0;
+            }
+            if (uart_out.size() != last_len) {
+                last_len = uart_out.size();
+                idle = 0;
+            } else if (!uart_out.empty() && ++idle > 2000) {
+                return;
             }
         }
     }
@@ -116,7 +118,9 @@ struct Sim {
 
 static std::string find_hex() {
     const char* candidates[] = {
+        "sw/hello_c/hello_c.hex",
         "sw/hello/hello.hex",
+        "../sw/hello_c/hello_c.hex",
         "../sw/hello/hello.hex",
         "hello.hex",
     };
@@ -134,10 +138,16 @@ int main(int argc, char** argv) {
     std::string hex = (argc > 1) ? argv[1] : find_hex();
     if (hex.empty()) {
         std::fprintf(stderr,
-            "Usage: Vsoc <hello.hex>\n"
-            "Build first:  make -C sw/hello\n");
+            "Usage: Vsoc <image.hex> [expected_uart_text]\n"
+            "Build first:  make -C sw/hello   or   make -C sw/hello_c\n");
         return 2;
     }
+
+    // Optional expected string (argv[2]). Default matches asm hello.
+    std::string expect = (argc > 2) ? argv[2] : "Hello from RISC-V!\n";
+    // Allow "\\n" in shell-passed expectations
+    for (size_t pos = 0; (pos = expect.find("\\n", pos)) != std::string::npos;)
+        expect.replace(pos, 2, "\n");
 
     Sim s;
     std::printf("Loading %s\n", hex.c_str());
@@ -145,18 +155,17 @@ int main(int argc, char** argv) {
         return 1;
 
     s.reset();
-    s.run_until_idle();
+    s.run_until_idle(100000);
 
     std::printf("UART output (%zu bytes):\n", s.uart_out.size());
     std::fwrite(s.uart_out.data(), 1, s.uart_out.size(), stdout);
     if (s.uart_out.empty() || s.uart_out.back() != '\n')
         std::printf("\n");
 
-    const char* expect = "Hello from RISC-V!\n";
     if (s.uart_out == expect) {
         std::printf("PASS: hello program printed expected string\n");
         return 0;
     }
-    std::printf("FAIL: expected \"%s\"\n", expect);
+    std::printf("FAIL: expected \"%s\"\n", expect.c_str());
     return 1;
 }

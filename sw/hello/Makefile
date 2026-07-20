@@ -16,6 +16,10 @@ endif
 CC        := $(PREFIX)gcc
 OBJCOPY   := $(PREFIX)objcopy
 OBJDUMP   := $(PREFIX)objdump
+PYTHON    ?= python3
+ifeq ($(shell command -v $(PYTHON) 2>/dev/null),)
+  PYTHON  := /ucrt64/bin/python3
+endif
 
 CFLAGS    := -march=rv32im -mabi=ilp32 -O2 -nostdlib -ffreestanding \
              -Wall -Wextra
@@ -32,7 +36,7 @@ $(OUT)/hello.bin: $(OUT)/hello.elf
 	$(OBJCOPY) -O binary $< $@
 
 $(OUT)/hello.hex: $(OUT)/hello.bin
-	python $(ROOT)/scripts/bin2hex.py $< $@
+	$(PYTHON) $(ROOT)/scripts/bin2hex.py $< $@
 
 dump: $(OUT)/hello.elf
 	$(OBJDUMP) -d -s $<

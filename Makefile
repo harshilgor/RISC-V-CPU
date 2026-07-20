@@ -32,7 +32,7 @@ VERILATOR_FLAGS := -Wall --trace --cc --exe --build -j 0 \
 
 SIM_BIN := $(OBJ_DIR)/V$(TOP)
 
-.PHONY: all sim waves clean hello
+.PHONY: all sim waves clean hello hello-c timer-irq demo
 
 all: sim
 
@@ -52,9 +52,39 @@ hello:
 	@mkdir -p $(WAVE_DIR)
 	./$(OBJ_DIR)/Vsoc sw/hello/hello.hex
 
+# C hello: crt0 (stack + .data/.bss) + UART putchar + main()
+hello-c:
+	$(MAKE) -C sw/hello_c
+	$(VERILATOR) -Wall --trace --cc --exe --build -j 0 \
+		-CFLAGS "-std=c++17" --top-module soc -Mdir $(OBJ_DIR) \
+		$(wildcard $(RTL_DIR)/*.sv) $(TB_DIR)/tb_hello.cpp
+	@mkdir -p $(WAVE_DIR)
+	./$(OBJ_DIR)/Vsoc sw/hello_c/hello_c.hex "Hello from C on RISC-V!\nmagic=42 local=43\n"
+
+# Timer interrupt demo (3x '!' from handler)
+timer-irq:
+	$(MAKE) -C sw/timer_irq
+	$(VERILATOR) -Wall --trace --cc --exe --build -j 0 \
+		-CFLAGS "-std=c++17" --top-module soc -Mdir $(OBJ_DIR) \
+		$(wildcard $(RTL_DIR)/*.sv) $(TB_DIR)/tb_hello.cpp
+	@mkdir -p $(WAVE_DIR)
+	./$(OBJ_DIR)/Vsoc sw/timer_irq/timer_irq.hex "timer irq demo\n!!!\ndone\n"
+
+# Bigger C demo: fibonacci, sum, squares, bubble-sort
+demo:
+	$(MAKE) -C sw/demo
+	$(VERILATOR) -Wall --trace --cc --exe --build -j 0 \
+		-CFLAGS "-std=c++17" --top-module soc -Mdir $(OBJ_DIR) \
+		$(wildcard $(RTL_DIR)/*.sv) $(TB_DIR)/tb_hello.cpp
+	@mkdir -p $(WAVE_DIR)
+	./$(OBJ_DIR)/Vsoc sw/demo/demo.hex "=== RISC-V SoC demo ===\nfib: 0 1 1 2 3 5 8 13 21 34 55 89 144\nsum(1..20)=210\nsquares: 1 4 9 16 25 36 49 64 81 100\nsorted: 1 2 3 4 5 7 8 9\n=== done ===\n"
+
 waves: sim
 	gtkwave $(WAVE_DIR)/$(TOP).vcd &
 
 clean:
 	rm -rf $(OBJ_DIR) $(WAVE_DIR)
 	$(MAKE) -C sw/hello clean
+	$(MAKE) -C sw/hello_c clean
+	$(MAKE) -C sw/timer_irq clean
+	$(MAKE) -C sw/demo clean

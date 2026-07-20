@@ -174,6 +174,7 @@ Priority (highest first):
 | ROM (fetch) | `0x0000_0000` | Boot / instruction ROM |
 | RAM | `0x1000_0000` | 4 KiB data RAM |
 | UART | `0x1001_0000` | `TXDATA` @ +0, `TXSTATUS` @ +4 |
+| TIMER | `0x1002_0000` | `mtime` @ +0, `mtimecmp` @ +4 |
 
 Instruction fetch always comes from ROM. Loads/stores decode to RAM or UART. The UART drives a `uart_tx_byte` / `uart_tx_valid` sideband so the testbench can capture printed characters.
 
@@ -233,15 +234,37 @@ From PowerShell in the project root:
 
 See [PIPELINE.md](PIPELINE.md). Default `TOP=cpu` is still the single-cycle wrapper for comparison.
 
-### Real program: UART hello
+### Real programs on the SoC
 
-Assembles `sw/hello/hello.S` with a RISC-V GCC (xPack under `tools/` if present), loads the hex into ROM, and checks UART output:
+Needs RISC-V GCC (xPack under `tools/` if present).
+
+**Assembly hello** (`sw/hello/hello.S`):
 
 ```powershell
 .\scripts\run.ps1 "hello"
 ```
 
-Expected: `PASS: hello program printed expected string`
+**C hello** (`sw/hello_c/`): startup sets the stack, copies `.data`, clears `.bss`, then `main()` prints via a UART `putchar`:
+
+```powershell
+.\scripts\run.ps1 "hello-c"
+```
+
+### Timer interrupts
+
+Machine timer at `0x1002_0000` (`mtime` / `mtimecmp`). CSRs: `mie.MTIE`, `mip.MTIP`, `mstatus.MIE`. Demo:
+
+```powershell
+.\scripts\run.ps1 "timer-irq"
+```
+
+Expected UART: `timer irq demo` then three `!` from the handler, then `done`.
+
+**Bigger C demo** (`sw/demo/`): fibonacci table, sum, squares, and an in-place bubble sort — more stack/loops/functions:
+
+```powershell
+.\scripts\run.ps1 "demo"
+```
 
 ### Unit-test one module
 
@@ -307,7 +330,9 @@ Waveforms go to `waves/cpu.vcd`. Useful signals in GTKWave: `clk`, `dbg_pc`, `db
 - [x] Teaching SoC: ROM + RAM + memory-mapped UART
 - [x] [5-stage pipeline](PIPELINE.md) Phases 1–6 complete (pipelined SoC)
 - [ ] Interrupts (`mie` / `mip`) and more CSRs
-- [ ] Assembler / `riscv32-unknown-elf-gcc` to `.hex` load flow
+- [x] C bare-metal hello (`sw/hello_c`: crt0, stack, `.data`/`.bss`, UART)
+- [x] Timer interrupts (`mie`/`mip`/`mstatus.MIE`, SoC `mtime`/`mtimecmp`)
+- [x] Bigger C demo (`sw/demo`: fib / sum / squares / sort)
 - [ ] FPGA synthesis (timing / Fmax)
 
 ---

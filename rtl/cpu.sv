@@ -27,6 +27,7 @@ module cpu (
         .imem_addr(imem_addr), .imem_rdata(imem_rdata),
         .dmem_addr(dmem_addr), .dmem_wdata(dmem_wdata), .dmem_rdata(dmem_rdata),
         .dmem_we(dmem_we), .dmem_re(dmem_re), .dmem_funct3(dmem_funct3),
+        .timer_irq(1'b0),
         .dbg_reg_addr(dbg_reg_addr), .dbg_reg_data(dbg_reg_data),
         .dbg_pc(dbg_pc), .dbg_instr(dbg_instr),
         .dbg_mepc(dbg_mepc), .dbg_mcause(dbg_mcause),

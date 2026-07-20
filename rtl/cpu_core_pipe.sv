@@ -19,6 +19,9 @@ module cpu_core_pipe (
     output logic        dmem_re,
     output logic [2:0]  dmem_funct3,
 
+    // External interrupt pendings (level)
+    input  logic        timer_irq,
+
     input  logic [4:0]  dbg_reg_addr,
     output logic [31:0] dbg_reg_data,
     output logic [31:0] dbg_pc,
@@ -358,13 +361,30 @@ module cpu_core_pipe (
 
     assign exec_result = id_ex_use_mdu ? mdu_result : alu_result;
 
-    // ---- CSR / traps (EX) ---------------------------------------------------
-    logic        trap_ex;
+    // ---- CSR / traps / interrupts (EX) --------------------------------------
+    logic        trap_exception, irq_take, trap_ex;
+    logic [31:0] trap_cause;
     logic [31:0] csr_rdata, csr_wdata, csr_src;
     logic        csr_we;
-    logic [31:0] mtvec, mepc, mcause, mstatus;
+    logic [31:0] mtvec, mepc, mcause, mstatus, mie, mip;
+    logic        irq_timer;
+    logic        mret_ex;
 
-    assign trap_ex = id_ex_valid && (id_ex_trap_ecall || id_ex_trap_ebreak);
+    assign trap_exception = id_ex_valid && (id_ex_trap_ecall || id_ex_trap_ebreak);
+    assign mret_ex        = id_ex_valid && id_ex_mret;
+    // Take timer IRQ on a valid EX instruction (re-execute it after mret).
+    // Exceptions and mret win over interrupts.
+    assign irq_take = id_ex_valid && irq_timer && !trap_exception && !mret_ex;
+    assign trap_ex  = trap_exception || irq_take;
+
+    always_comb begin
+        if (id_ex_trap_ebreak)
+            trap_cause = 32'd3;
+        else if (id_ex_trap_ecall)
+            trap_cause = 32'd11;
+        else
+            trap_cause = 32'h8000_0007;  // Machine timer interrupt
+    end
 
     assign csr_src = id_ex_csr_use_imm ? {27'b0, id_ex_rs1} : fwd_rs1;
 
@@ -396,10 +416,18 @@ module cpu_core_pipe (
         .we(csr_we),
         .rdata(csr_rdata),
         .trap(trap_ex),
-        .trap_ebreak(id_ex_trap_ebreak),
+        .trap_cause(trap_cause),
         .trap_pc(id_ex_pc),
-        .mtvec(mtvec), .mepc(mepc), .mcause(mcause), .mstatus(mstatus)
+        .mret(mret_ex),
+        .ext_mtip(timer_irq),
+        .mtvec(mtvec), .mepc(mepc), .mcause(mcause), .mstatus(mstatus),
+        .mie(mie), .mip(mip), .irq_timer(irq_timer)
     );
+
+    /* verilator lint_off UNUSEDSIGNAL */
+    logic unused_mie_mip;
+    assign unused_mie_mip = |{mie, mip};
+    /* verilator lint_on UNUSEDSIGNAL */
 
     assign dbg_mepc    = mepc;
     assign dbg_mcause  = mcause;
@@ -436,7 +464,7 @@ module cpu_core_pipe (
         if (trap_ex) begin
             pc_redirect        = 1'b1;
             pc_redirect_target = mtvec;
-        end else if (id_ex_valid && id_ex_mret) begin
+        end else if (mret_ex) begin
             pc_redirect        = 1'b1;
             pc_redirect_target = mepc;
         end else if (id_ex_valid && id_ex_jalr) begin
@@ -448,7 +476,7 @@ module cpu_core_pipe (
         end
     end
 
-    // EX/MEM — kill reg/mem write on trap
+    // EX/MEM — kill reg/mem write on trap/interrupt
     logic        ex_mem_valid;
     logic [31:0] ex_mem_pc, ex_mem_pc4, ex_mem_rs2_data;
     logic [2:0]  ex_mem_funct3;

@@ -15,6 +15,8 @@ module cpu_core (
     output logic        dmem_re,
     output logic [2:0]  dmem_funct3,
 
+    input  logic        timer_irq,
+
     // Debug
     input  logic [4:0]  dbg_reg_addr,
     output logic [31:0] dbg_reg_data,
@@ -97,8 +99,22 @@ module cpu_core (
         .csr_use_imm (csr_use_imm)
     );
 
-    logic trap;
-    assign trap = trap_ecall | trap_ebreak;
+    logic trap_exception, irq_take, trap;
+    logic [31:0] trap_cause;
+    /* verilator lint_off UNUSEDSIGNAL */
+    logic [31:0] mie, mip;
+    /* verilator lint_on UNUSEDSIGNAL */
+    logic        irq_timer;
+
+    assign trap_exception = trap_ecall | trap_ebreak;
+    assign irq_take       = irq_timer && !trap_exception && !mret;
+    assign trap           = trap_exception | irq_take;
+
+    always_comb begin
+        if (trap_ebreak)     trap_cause = 32'd3;
+        else if (trap_ecall) trap_cause = 32'd11;
+        else                 trap_cause = 32'h8000_0007;
+    end
 
     logic [31:0] imm, rs1_data, rs2_data, rd_data;
 
@@ -184,8 +200,11 @@ module cpu_core (
     csr_file u_csr (
         .clk(clk), .rst_n(rst_n),
         .addr(csr_addr), .wdata(csr_wdata), .we(csr_we), .rdata(csr_rdata),
-        .trap(trap), .trap_ebreak(trap_ebreak), .trap_pc(pc),
-        .mtvec(mtvec), .mepc(mepc), .mcause(mcause), .mstatus(mstatus)
+        .trap(trap), .trap_cause(trap_cause), .trap_pc(pc),
+        .mret(mret),
+        .ext_mtip(timer_irq),
+        .mtvec(mtvec), .mepc(mepc), .mcause(mcause), .mstatus(mstatus),
+        .mie(mie), .mip(mip), .irq_timer(irq_timer)
     );
 
     assign dbg_mepc    = mepc;
